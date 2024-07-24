@@ -1,3 +1,16 @@
+//where cascade live. Format: rgba16f min + rgba16f max packed into rgba32ui
+uniform layout(binding = 2, rgba32ui) uimage2DArray Lo;
+
+//depth buffer
+uniform layout(binding = 3, r32f) image2DArray depth;
+
+//preaveraging
+uniform layout(binding = 6, rgba32ui) uimage2DArray downSampledCascade;
+
+//min/max depth buffer
+uniform layout(binding = 7, rgba32ui) uimage2D depthMip;
+
+
 bool raytrace(in Ray ray, out Hit hit) {
   return false;
 }
