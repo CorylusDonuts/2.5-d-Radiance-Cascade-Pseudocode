@@ -81,7 +81,7 @@ void main(){
 	  	int iProbeDim = int(probeDim);
 	  	float probePixDim = float(1 << (cascadeIndex + 1));
 	  	//fProbeDim or fPixDim???
-	  	ivec2 blProbeID = clamp(ivec2((probePixCoor - 0.0 * probePixDim) / probePixDim), ivec2(0), ivec2(res/probePixDim) - 2);
+	  	ivec2 blProbeID = clamp(ivec2((probePixCoor - 0.5 * probePixDim) / probePixDim), ivec2(0), ivec2(res/probePixDim) - 2);
 	 	ivec2 f = octMirror(ivec2(probeDim * octEncode(r.dir)), iProbeDim);
 	 	ivec2 blTexCoor = blProbeID.xy * iProbeDim;
 		vec2 blProbePixCoor = blTexCoor + 0.5 * probePixCoor;
