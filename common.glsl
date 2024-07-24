@@ -10,7 +10,7 @@ uniform layout(binding = 6, rgba32ui) uimage2DArray downSampledCascade;
 //min/max depth buffer
 uniform layout(binding = 7, rgba32ui) uimage2D depthMip;
 
-
+//this one is a secret :p
 bool raytrace(in Ray ray, out Hit hit) {
   return false;
 }
