@@ -77,8 +77,7 @@ void main(){
 
   	vec2 clampFactor = USE_MAX ? vec2(1) : USE_MIN ? vec2(0) : vec2(0, 1);
 
-  	float aa = 0;
- 	 if(cascadeIndex < numCascade - 1){
+ 	if(cascadeIndex < numCascade - 1){
 	  	int iProbeDim = int(probeDim);
 	  	float probePixDim = float(1 << (cascadeIndex + 1));
 	  	//fProbeDim or fPixDim???
