@@ -1,3 +1,14 @@
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+uniform vec2 res;
+
+uniform uint numCascade;
+uniform uint cascadeIndex;
+uniform uint probeDim0;
+uniform float rayStart;
+uniform float rayEnd;
+uniform uint depthOffset;
+uniform uint depthOffset2;
+
 void main(){
 	
 	const uvec2 tid = gl_GlobalInvocationID.xy;
