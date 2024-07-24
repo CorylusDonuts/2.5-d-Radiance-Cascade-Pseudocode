@@ -10,6 +10,28 @@ uniform layout(binding = 6, rgba32ui) uimage2DArray downSampledCascade;
 //min/max depth buffer
 uniform layout(binding = 7, rgba32ui) uimage2D depthMip;
 
+//should be named probeData
+struct PixelData{
+	uvec2 minCoor;
+	uvec2 maxCoor;
+	float minDist;
+	float maxDist;
+};
+
+struct Ray {
+    vec3 pos;
+    float len;
+    vec3 dir;
+    uint vox;
+};
+
+struct Hit {
+    vec3 pos;
+    float dist;
+    vec3 norm;
+    uint vox;
+};
+
 //this one is a secret :p
 bool raytrace(in Ray ray, out Hit hit) {
   return false;
@@ -78,9 +100,4 @@ vec4 getDownSampledCascade(vec2 coor, vec3 dir, unsigned int cascadeIndex){
 	return imageLoad(downSampledCascade, ivec3(texCoor, cascadeIndex));
 }
 
-struct PixelData{
-	uvec2 minCoor;
-	uvec2 maxCoor;
-	float minDist;
-	float maxDist;
-};
+
