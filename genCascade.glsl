@@ -9,139 +9,143 @@ uniform float rayEnd;
 uniform uint depthOffset;
 uniform uint depthOffset2;
 
-void main(){
-	
-	const uvec2 tid = gl_GlobalInvocationID.xy;
-	const uint probeDim = probeDim0 << cascadeIndex;
-	
-	float fProbeDim = float(probeDim);
-	
+//minDist minCoor maxDist maxCoor
+struct PixelData{
+	uvec2 minMaxCoor[2];
+	float minMaxDist[2];
+};
+
+
+struct MinMaxInterval{
+	vec3 minMaxLi[2];
+	float minMaxDepth[2];
+};
+
+const int probeDim = int(probeDim0 << cascadeIndex);
+float fProbeDim = float(probeDim);
+uint depthArrayIndex = cascadeIndex == 0 ? 0 : 2;
+const bool isHighestCascade = cascadeIndex == numCascade - 1;
+
+MinMaxInterval genRadianceInterval(in uint idx){
+	MinMaxInterval I;
+
+	const uvec2 tid = 2 * gl_GlobalInvocationID.xy + uvec2(idx & 1, idx >> 1);
 
 	uvec2 probeID = tid / probeDim;
 	uvec2 rayID = tid % probeDim;
 	vec2 octUV = (vec2(rayID) + 0.5) / fProbeDim; // 0 to 1
-	
 	vec2 probePixCoor = (vec2(probeID) + 0.5) * (1 << cascadeIndex);
-	uint depthArrayIndex = cascadeIndex == 0 ? 0 : 2;
 
 	PixelData p;
 	if(cascadeIndex == 0 || false){
-		p.minCoor = probeID;
-		p.maxCoor = p.minCoor;
-		p.minDist = abs(imageLoad(depth, ivec3(probeID, 0)).r);
-		p.maxDist = p.minDist;
+		p.minMaxCoor[0] = probeID;
+		p.minMaxCoor[1] = p.minMaxCoor[0];
+		p.minMaxDist[0] = abs(imageLoad(depth, ivec3(probeID, 0)).r);
+		p.minMaxDist[1] = p.minMaxDist[0];
 	}
-	else{
+	else {
 		uvec4 data = imageLoad(depthMip, ivec2(probeID + uvec2(depthOffset, 0)));
-		p.minDist = uintBitsToFloat(data.r);
-		p.minCoor = uvec2(data.g & 0xFFFF, (data.g >> 16) & 0xFFFF);
-		p.maxDist = uintBitsToFloat(data.b);
-		p.maxCoor = uvec2(data.w & 0xFFFF, (data.w >> 16) & 0xFFFF);
+		p.minMaxDist[0] = uintBitsToFloat(data.r);
+		p.minMaxCoor[0] = uvec2(data.g & 0xFFFF, (data.g >> 16) & 0xFFFF);
+		p.minMaxDist[1] = uintBitsToFloat(data.b);
+		p.minMaxCoor[1] = uvec2(data.w & 0xFFFF, (data.w >> 16) & 0xFFFF);
 	}
+	
+	
+	
+	
 
 	Ray r;
 	r.dir = octDecode(octUV);
-	r.pos = currentScreenToWorld(p.minCoor, p.minDist) + r.dir * rayStart;
-	r.len = rayEnd - rayStart;
 	r.vox = 0;
 
 	Hit h;
-	float col;
-	bool found = false;
-	bool needTrace = length(r.pos - camPos) < 4000;
-	if(needTrace){
-		found = raytrace(r, h, col);
-	}
-	vec3 LiMin = vec3(0);
-	float vMin = float(!found);
 
-	Material m = getMaterial(h.vox);
-	if(found) LiMin = m.emmissivity + getNEE(h, false) * m.baseColor;
-	else if(cascadeIndex == numCascade - 1) LiMin += sampleSky(r.dir);
+	float visibility[2];
+
+	float col;//useless var
+	for(uint i = 0; i < 2; i++){
+		r.pos = currentScreenToWorld(p.minMaxCoor[i], p.minMaxDist[i]) + r.dir * rayStart;
+		r.len = rayEnd - rayStart;
+
+		bool found = false;
+		bool needTrace = length(r.pos - camPos) < 4000;
+		if(needTrace){
+			found = raytrace(r, h, col);
+		}
+		I.minMaxLi[i] = vec3(0);
+		I.minMaxDepth[i] = p.minMaxDist[i];
+		visibility[i] = float(!found);
+
+		Material m = getMaterial(h.vox);
+		if(found) I.minMaxLi[i] = m.emmissivity + getNEE(h, false) * m.baseColor;
+		else if(isHighestCascade) I.minMaxLi[i] += sampleSky(r.dir);
+	}
+
+
+	if(!isHighestCascade){
+		float probePixDim = float(1 << (cascadeIndex + 1));
+		//fProbeDim or fPixDim???
+		ivec2 texCoor = clamp(ivec2((probePixCoor - 0.5 * probePixDim) / probePixDim), ivec2(0), ivec2(res/probePixDim) - 2) * probeDim;
+		vec2 fr = (probePixCoor - (texCoor + 0.5 * probePixCoor)) / probePixDim;
+		texCoor += octMirror(ivec2(probeDim * octEncode(r.dir)), probeDim);
+
+		uvec4 blData = imageLoad(Lo, ivec3(texCoor,							cascadeIndex + 1));
+		uvec4 brData = imageLoad(Lo, ivec3(texCoor + ivec2(probeDim, 0),	cascadeIndex + 1));
+		uvec4 tlData = imageLoad(Lo, ivec3(texCoor + ivec2(0, probeDim),	cascadeIndex + 1));
+		uvec4 trData = imageLoad(Lo, ivec3(texCoor + ivec2(probeDim   ),	cascadeIndex + 1));
+
+		vec4 blMin = vec4(unpackHalf2x16(blData.r), unpackHalf2x16(blData.g));
+		vec4 blMax = vec4(unpackHalf2x16(blData.b), unpackHalf2x16(blData.w));
+		vec4 brMin = vec4(unpackHalf2x16(brData.r), unpackHalf2x16(brData.g));
+		vec4 brMax = vec4(unpackHalf2x16(brData.b), unpackHalf2x16(brData.w));
+		vec4 tlMin = vec4(unpackHalf2x16(tlData.r), unpackHalf2x16(tlData.g));
+		vec4 tlMax = vec4(unpackHalf2x16(tlData.b), unpackHalf2x16(tlData.w));
+		vec4 trMin = vec4(unpackHalf2x16(trData.r), unpackHalf2x16(trData.g));
+		vec4 trMax = vec4(unpackHalf2x16(trData.b), unpackHalf2x16(trData.w));
+
+		vec4 iDistRange = vec4(1.) / vec4(blMax.w - blMin.w, brMax.w - brMin.w, tlMax.w - tlMin.w, trMax.w - trMin.w);
+		vec4 bw = vec4((1 - fr.x) * (1 - fr.y) , fr.x * (1 - fr.y), (1 - fr.x) * fr.y, fr.x * fr.y); //bilinear weight
+		
+		for(uint i = 0; i < 2; i++){
+			vec4 deltaDist = vec4(blMax.w - p.minMaxDist[i], brMax.w - p.minMaxDist[i], tlMax.w - p.minMaxDist[i], trMax.w - p.minMaxDist[i]);
+			vec4 minmaxW = vec4(clamp(1 - (blMax.w - p.minMaxDist[i]) * iDistRange.x, 0, 1),
+								clamp(1 - (brMax.w - p.minMaxDist[i]) * iDistRange.y, 0, 1),
+								clamp(1 - (tlMax.w - p.minMaxDist[i]) * iDistRange.z, 0, 1),
+								clamp(1 - (trMax.w - p.minMaxDist[i]) * iDistRange.w, 0, 1));
+			vec4 bl = mix(blMin, blMax, minmaxW.r);
+			vec4 br = mix(brMin, brMax, minmaxW.g);
+			vec4 tl = mix(tlMin, tlMax, minmaxW.b);
+			vec4 tr = mix(trMin, trMax, minmaxW.a);
+
+			vec4 ds = vec4(bl.w, br.w, tl.w, tr.w);
+			vec4 dw = exp(-(abs(p.minMaxDist[i] - ds)/p.minMaxDist[i])*32); //bilateral weight
+			vec4 w = bw * dw;
+			float sw = w.x + w.y + w.z + w.w;
+			w /= sw;
+
+			I.minMaxLi[i] += vec3(bl.rgb * w.x + br.rgb * w.y + tl.rgb * w.z + tr.rgb * w.w) * visibility[i];
+		}
+	}
+	return I;
+}
+
+void main(){
+	MinMaxInterval I;
+	I.minMaxLi[0] = vec3(0);
+	I.minMaxLi[1] = vec3(0);
+	//preaveraging
+	for(uint i = 0; i < 4; i++){
+		MinMaxInterval Ii = genRadianceInterval(i);
+		I.minMaxLi[0] += Ii.minMaxLi[0];
+		I.minMaxLi[1] += Ii.minMaxLi[1];
+		I.minMaxDepth[0] = Ii.minMaxDepth[0];
+		I.minMaxDepth[1] = Ii.minMaxDepth[1];
+	}
+	I.minMaxLi[0] *= 0.25;
+	I.minMaxLi[1] *= 0.25;
+
+	uvec4 LoData = uvec4(packHalf2x16(I.minMaxLi[0].rg), packHalf2x16(vec2(I.minMaxLi[0].b, I.minMaxDepth[0])), packHalf2x16(I.minMaxLi[1].rg), packHalf2x16(vec2(I.minMaxLi[1].b, I.minMaxDepth[1])));
+	imageStore(Lo, ivec3(gl_GlobalInvocationID.xy, cascadeIndex), LoData);
 	
-
-	r.pos = currentScreenToWorld(p.maxCoor, p.maxDist) + r.dir * rayStart;
-	if(needTrace){
-		found = raytrace(r, h, col);
-	}
-	vec3 LiMax = vec3(0);
-	float vMax = float(!found);
-	
-	m = getMaterial(h.vox);
-	if(found) LiMax = m.emmissivity + getNEE(h, false) * m.baseColor;
-	else if(cascadeIndex == numCascade - 1) LiMax += sampleSky(r.dir);
-
-  	const bool USE_MIN	= bool(0);
-  	const bool USE_MAX	= bool(0);
-  	const bool USE_BOTH 	= bool(1);
-
-  	vec2 clampFactor = USE_MAX ? vec2(1) : USE_MIN ? vec2(0) : vec2(0, 1);
-
- 	if(cascadeIndex < numCascade - 1){
-	  	int iProbeDim = int(probeDim);
-	  	float probePixDim = float(1 << (cascadeIndex + 1));
-	  	//fProbeDim or fPixDim???
-	  	ivec2 blProbeID = clamp(ivec2((probePixCoor - 0.5 * probePixDim) / probePixDim), ivec2(0), ivec2(res/probePixDim) - 2);
-	 	ivec2 f = octMirror(ivec2(probeDim * octEncode(r.dir)), iProbeDim);
-	 	ivec2 blTexCoor = blProbeID.xy * iProbeDim;
-		vec2 blProbePixCoor = blTexCoor + 0.5 * probePixCoor;
-		vec2 fr = (probePixCoor - blProbePixCoor) / probePixDim;
-
-	  	uvec4 blColor = imageLoad(downSampledCascade, ivec3(blTexCoor + f,					   cascadeIndex));
-	  	uvec4 brColor = imageLoad(downSampledCascade, ivec3(blTexCoor + f + ivec2(iProbeDim, 0), cascadeIndex));
-	  	uvec4 tlColor = imageLoad(downSampledCascade, ivec3(blTexCoor + f + ivec2(0, iProbeDim), cascadeIndex));
-	  	uvec4 trColor = imageLoad(downSampledCascade, ivec3(blTexCoor + f + ivec2(iProbeDim   ), cascadeIndex));
-
-    		vec4 blMin = vec4(unpackHalf2x16(blColor.r), unpackHalf2x16(blColor.g));
-    		vec4 blMax = vec4(unpackHalf2x16(blColor.b), unpackHalf2x16(blColor.w));
-    		vec4 brMin = vec4(unpackHalf2x16(brColor.r), unpackHalf2x16(brColor.g));
-    		vec4 brMax = vec4(unpackHalf2x16(brColor.b), unpackHalf2x16(brColor.w));
-    		vec4 tlMin = vec4(unpackHalf2x16(tlColor.r), unpackHalf2x16(tlColor.g));
-    		vec4 tlMax = vec4(unpackHalf2x16(tlColor.b), unpackHalf2x16(tlColor.w));
-    		vec4 trMin = vec4(unpackHalf2x16(trColor.r), unpackHalf2x16(trColor.g));
-    		vec4 trMax = vec4(unpackHalf2x16(trColor.b), unpackHalf2x16(trColor.w));
-
-    		vec4 iDistRange = vec4(1.) / vec4(blMax.w - blMin.w, brMax.w - brMin.w, tlMax.w - tlMin.w, trMax.w - trMin.w);
-    		vec4 deltaDist = vec4(blMax.w - p.minDist, brMax.w - p.minDist, tlMax.w - p.minDist, trMax.w - p.minDist);
-
-    		vec4 minmaxW = vec4(	clamp(1 - (blMax.w - p.minDist) * iDistRange.x, clampFactor.x, clampFactor.y),
-					clamp(1 - (brMax.w - p.minDist) * iDistRange.y, clampFactor.x, clampFactor.y),
-					clamp(1 - (tlMax.w - p.minDist) * iDistRange.z, clampFactor.x, clampFactor.y),
-					clamp(1 - (trMax.w - p.minDist) * iDistRange.w, clampFactor.x, clampFactor.y));
-
-
-    		vec4 bl = mix(blMin, blMax, minmaxW.r);
-    		vec4 br = mix(brMin, brMax, minmaxW.g);
-    		vec4 tl = mix(tlMin, tlMax, minmaxW.b);
-    		vec4 tr = mix(trMin, trMax, minmaxW.a);
-
-    		vec4 ds = vec4(bl.w, br.w, tl.w, tr.w);
-    		vec4 dw = exp(-(abs(p.minDist - ds)/p.minDist)*6);
-    		vec4 w = vec4((1 - fr.x) * (1 - fr.y) , fr.x * (1 - fr.y), (1 - fr.x) * fr.y, fr.x * fr.y) * dw;
-
-    		float sw = w.x + w.y + w.z + w.w;
-    		w /= sw;
-    		vec3 Ri = bl.rgb * w.x + br.rgb * w.y + tl.rgb * w.z + tr.rgb * w.w;
-
-    		LiMin += Ri * vMin;
-    		minmaxW = vec4(	clamp(1 - (blMax.w - p.maxDist) * iDistRange.x, clampFactor.x, clampFactor.y),
-				clamp(1 - (brMax.w - p.maxDist) * iDistRange.y, clampFactor.x, clampFactor.y),
-				clamp(1 - (tlMax.w - p.maxDist) * iDistRange.z, clampFactor.x, clampFactor.y),
-				clamp(1 - (trMax.w - p.maxDist) * iDistRange.w, clampFactor.x, clampFactor.y));
-
-		bl = mix(blMin, blMax, minmaxW.r);
-		br = mix(brMin, brMax, minmaxW.g);
-		tl = mix(tlMin, tlMax, minmaxW.b);
-		tr = mix(trMin, trMax, minmaxW.a);
-
-    		ds = vec4(bl.w, br.w, tl.w, tr.w);
-		dw = exp(-(abs(p.maxDist - ds)/p.maxDist)*6);
-		w = vec4((1 - fr.x) * (1 - fr.y) , fr.x * (1 - fr.y), (1 - fr.x) * fr.y, fr.x * fr.y) * dw;
-		sw = w.x + w.y + w.z + w.w;
-		w /= sw;
-		Ri = bl.rgb * w.x + br.rgb * w.y + tl.rgb * w.z + tr.rgb * w.w;
-
-		LiMax += Ri * vMax;
-	}
-  uvec4 LoData = uvec4(packHalf2x16(LiMin.rg), packHalf2x16(vec2(LiMin.b, p.minDist)), packHalf2x16(LiMax.rg), packHalf2x16(vec2(LiMax.b, p.maxDist)));
-  imageStore(Lo, ivec3(tid, cascadeIndex), LoData);
+}
