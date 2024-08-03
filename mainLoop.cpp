@@ -14,8 +14,8 @@ void RadianceCascade::Update(glm::vec3 sunDir, unsigned int frame) {
 
 	for (int i = NUM_CASCADE - 1; i >= 0; i--) {
 		unsigned int ui = i;
-		downSampleCascade.setVal<unsigned int>("cascadeIndex", ui);
-		downSampleCascade.setVal<unsigned int>("depthOffset", inoutDepthOffset[i + 1].x);
+		//downSampleCascade.setVal<unsigned int>("cascadeIndex", ui);
+		//downSampleCascade.setVal<unsigned int>("depthOffset", inoutDepthOffset[i + 1].x);
 
 		genCascade.setVal<unsigned int>("cascadeIndex", ui);
 		genCascade.setVal<float>("rayStart", rayIntervals[i].x);
@@ -24,14 +24,14 @@ void RadianceCascade::Update(glm::vec3 sunDir, unsigned int frame) {
 		genCascade.setVal<unsigned int>("depthOffset2", inoutDepthOffset[i+1].x);
 
 
-		if (i < NUM_CASCADE - 1) {
-			downSampleCascade.Dispatch(CASCADE_0_DIM * res.x / 16, CASCADE_0_DIM * res.y / 16, 1);
-			glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-		}
+		//if (i < NUM_CASCADE - 1) {
+		//	downSampleCascade.Dispatch(CASCADE_0_DIM * res.x / 16, CASCADE_0_DIM * res.y / 16, 1);
+		//	glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+		//}
 		
 
 		if (i >= LOWEST_CASCADE) {
-			genCascade.Dispatch(CASCADE_0_DIM * res.x / 8, CASCADE_0_DIM * res.y / 8, 1);
+			genCascade.Dispatch(CASCADE_0_DIM * res.x / 16, CASCADE_0_DIM * res.y / 16, 1);
 			glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 			
