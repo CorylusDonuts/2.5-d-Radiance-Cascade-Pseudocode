@@ -1,3 +1,6 @@
+#extension GL_KHR_shader_subgroup_basic: enable
+#extension GL_KHR_shader_subgroup_clustered : enable
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 uniform vec2 res;
 
@@ -26,10 +29,11 @@ float fProbeDim = float(probeDim);
 uint depthArrayIndex = cascadeIndex == 0 ? 0 : 2;
 const bool isHighestCascade = cascadeIndex == numCascade - 1;
 
-MinMaxInterval genRadianceInterval(in uint idx){
-	MinMaxInterval I;
+const uint ltidx = gl_SubgroupSize * gl_SubgroupID + gl_SubgroupInvocationID; //local thread index
+const uvec2 tid = uvec2((((ltidx >> 2) & 3) << 1) + (ltidx & 1), ((ltidx >> 4) << 1) + ((ltidx >> 1) & 1)) + gl_WorkGroupID.xy * gl_WorkGroupSize.xy; //swizzled global thread id
 
-	const uvec2 tid = 2 * gl_GlobalInvocationID.xy + uvec2(idx & 1, idx >> 1);
+MinMaxInterval genRadianceInterval(){
+	MinMaxInterval I;
 
 	uvec2 probeID = tid / probeDim;
 	uvec2 rayID = tid % probeDim;
@@ -50,9 +54,6 @@ MinMaxInterval genRadianceInterval(in uint idx){
 		p.minMaxDist[1] = uintBitsToFloat(data.b);
 		p.minMaxCoor[1] = uvec2(data.w & 0xFFFF, (data.w >> 16) & 0xFFFF);
 	}
-	
-	
-	
 	
 
 	Ray r;
@@ -130,22 +131,21 @@ MinMaxInterval genRadianceInterval(in uint idx){
 	return I;
 }
 
-void main(){
-	MinMaxInterval I;
-	I.minMaxLi[0] = vec3(0);
-	I.minMaxLi[1] = vec3(0);
-	//preaveraging
-	for(uint i = 0; i < 4; i++){
-		MinMaxInterval Ii = genRadianceInterval(i);
-		I.minMaxLi[0] += Ii.minMaxLi[0];
-		I.minMaxLi[1] += Ii.minMaxLi[1];
-		I.minMaxDepth[0] = Ii.minMaxDepth[0];
-		I.minMaxDepth[1] = Ii.minMaxDepth[1];
-	}
-	I.minMaxLi[0] *= 0.25;
-	I.minMaxLi[1] *= 0.25;
+uvec4 encodeInterval(in MinMaxInterval I){
+	return uvec4(packHalf2x16(I.minMaxLi[0].rg), packHalf2x16(vec2(I.minMaxLi[0].b, I.minMaxDepth[0])), packHalf2x16(I.minMaxLi[1].rg), packHalf2x16(vec2(I.minMaxLi[1].b, I.minMaxDepth[1])));
+}
 
-	uvec4 LoData = uvec4(packHalf2x16(I.minMaxLi[0].rg), packHalf2x16(vec2(I.minMaxLi[0].b, I.minMaxDepth[0])), packHalf2x16(I.minMaxLi[1].rg), packHalf2x16(vec2(I.minMaxLi[1].b, I.minMaxDepth[1])));
-	imageStore(Lo, ivec3(gl_GlobalInvocationID.xy, cascadeIndex), LoData);
+MinMaxInterval decodeInterval(in uvec4 d){
+	vec4 minLiDist = vec4(unpackHalf2x16(d.r), unpackHalf2x16(d.g));
+	vec4 maxLiDist = vec4(unpackHalf2x16(d.b), unpackHalf2x16(d.a));
+	return MinMaxInterval(vec3[2](vec3(minLiDist.rgb), vec3(maxLiDist.rgb)), float[2](minLiDist.a, maxLiDist.a));
+}
+
+void main(){
+
+	MinMaxInterval I = genRadianceInterval();
+	I.minMaxLi[0] = subgroupClusteredAdd(I.minMaxLi[0], 4) * 0.25;
+	I.minMaxLi[1] = subgroupClusteredAdd(I.minMaxLi[1], 4) * 0.25;
 	
+	if((ltidx & 3) == 0) imageStore(Lo, ivec3(tid >> 1, cascadeIndex), encodeInterval(I));
 }
