@@ -108,24 +108,21 @@ MinMaxInterval genRadianceInterval(){
 		vec4 iDistRange = vec4(1.) / vec4(blMax.w - blMin.w, brMax.w - brMin.w, tlMax.w - tlMin.w, trMax.w - trMin.w);
 		vec4 bw = vec4((1 - fr.x) * (1 - fr.y) , fr.x * (1 - fr.y), (1 - fr.x) * fr.y, fr.x * fr.y); //bilinear weight
 		
-		for(uint i = 0; i < 2; i++){
-			vec4 deltaDist = vec4(blMax.w - p.minMaxDist[i], brMax.w - p.minMaxDist[i], tlMax.w - p.minMaxDist[i], trMax.w - p.minMaxDist[i]);
-			vec4 minmaxW = vec4(clamp(1 - (blMax.w - p.minMaxDist[i]) * iDistRange.x, 0, 1),
-								clamp(1 - (brMax.w - p.minMaxDist[i]) * iDistRange.y, 0, 1),
-								clamp(1 - (tlMax.w - p.minMaxDist[i]) * iDistRange.z, 0, 1),
-								clamp(1 - (trMax.w - p.minMaxDist[i]) * iDistRange.w, 0, 1));
-			vec4 bl = mix(blMin, blMax, minmaxW.r);
-			vec4 br = mix(brMin, brMax, minmaxW.g);
-			vec4 tl = mix(tlMin, tlMax, minmaxW.b);
-			vec4 tr = mix(trMin, trMax, minmaxW.a);
+		//for minmax query
+		for(int i = 0; i < 2; i++){
+			vec4 w[2];
+			//for minmax cascade N+1
+			for(int j = 0; j < 2; j++){
+				vec4 ds = vec4(bl[j].w, br[j].w, tl[j].w, tr[j].w);
+				w[j] = exp(-(abs(p.minMaxDist[i] - ds)/p.minMaxDist[i])*16) * bw;
+			}
+			float sw = w[0].x + w[0].y + w[0].z + w[0].w + w[1].x + w[1].y + w[1].z + w[1].w;
+			w[0] /= sw;
+			w[1] /= sw;
 
-			vec4 ds = vec4(bl.w, br.w, tl.w, tr.w);
-			vec4 dw = exp(-(abs(p.minMaxDist[i] - ds)/p.minMaxDist[i])*32); //bilateral weight
-			vec4 w = bw * dw;
-			float sw = w.x + w.y + w.z + w.w;
-			w /= sw;
-
-			I.minMaxLi[i] += vec3(bl.rgb * w.x + br.rgb * w.y + tl.rgb * w.z + tr.rgb * w.w) * visibility[i];
+			for(int j = 0; j < 2; j++){
+			I.minMaxLi[i] += vec3(bl[j].rgb * w[j].x + br[j].rgb * w[j].y + tl[j].rgb * w[j].z + tr[j].rgb * w[j].w) * visibility[i];
+			}
 		}
 	}
 	return I;
